@@ -1,0 +1,128 @@
+import { NextRequest } from "next/server";
+import { isRequestAuthenticated } from "@/lib/auth";
+import {
+  fetchAiCompletion,
+  getArticleForSummary,
+  getSummaryInput,
+  parsePlainSummary,
+  saveSummary,
+  saveSummaryError,
+  validateSummaryRequest
+} from "@/lib/ai";
+import { serializeArticle } from "@/lib/serializers";
+
+type StreamChunk = {
+  choices?: Array<{
+    delta?: {
+      content?: string;
+    };
+  }>;
+};
+
+const encoder = new TextEncoder();
+
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+  if (!isRequestAuthenticated(request)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const body = (await request.json().catch(() => ({}))) as { force?: boolean; contentOverride?: string };
+  const article = await getArticleForSummary(params.id);
+
+  if (!body.force && article.aiSummary) {
+    return streamDone(serializeArticle(article));
+  }
+
+  const bodyText = getSummaryInput(article, typeof body.contentOverride === "string" ? body.contentOverride : undefined);
+  const early = await validateSummaryRequest(article.id, bodyText);
+  if (early) {
+    return streamDone(serializeArticle(early));
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), 120000);
+      let fullText = "";
+
+      try {
+        const response = await fetchAiCompletion(article, bodyText, true, abort.signal);
+        if (!response.body) throw new Error("AI 接口未返回流式内容");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+
+          for (const part of parts) {
+            const token = readSseToken(part);
+            if (!token) continue;
+            fullText += token;
+            send(controller, "token", token);
+          }
+        }
+
+        const parsed = parsePlainSummary(fullText);
+        const updated = await saveSummary(article.id, parsed);
+        send(controller, "done", serializeArticle(updated));
+      } catch (error) {
+        const updated = await saveSummaryError(article.id, error instanceof Error ? error.message : "AI 摘要生成失败");
+        send(controller, "error", serializeArticle(updated));
+      } finally {
+        clearTimeout(timer);
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      Connection: "keep-alive"
+    }
+  });
+}
+
+function streamDone(data: unknown) {
+  return new Response(encoder.encode(formatSse("done", data)), {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
+function readSseToken(part: string) {
+  const lines = part
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+
+  let token = "";
+  for (const line of lines) {
+    if (!line || line === "[DONE]") continue;
+    try {
+      const chunk = JSON.parse(line) as StreamChunk;
+      token += chunk.choices?.[0]?.delta?.content || "";
+    } catch {
+      continue;
+    }
+  }
+  return token;
+}
+
+function send(controller: ReadableStreamDefaultController<Uint8Array>, event: string, data: unknown) {
+  controller.enqueue(encoder.encode(formatSse(event, data)));
+}
+
+function formatSse(event: string, data: unknown) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}

@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      SESSION_SECRET: ${SESSION_SECRET:-replace-with-a-long-random-secret}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      DATABASE_URL: ${DATABASE_URL:-file:/data/rss.db}
+      REFRESH_INTERVAL_MINUTES: ${REFRESH_INTERVAL_MINUTES:-30}
+      PUBLIC_FEED: ${PUBLIC_FEED:-false}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_MODEL: ${AI_MODEL:-gpt-4.1-mini}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-30}
+    volumes:
+      - ai-rss-data:/data
+    ports:
+      - "3000:3000"
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-:80}
+    ports:
+      - "11111:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  ai-rss-data:
+  caddy-data:
+  caddy-config:
