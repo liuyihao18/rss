@@ -1,6 +1,7 @@
 import type { Article, Source } from "@prisma/client";
 import { prisma } from "./db";
 import { appConfig, isAiConfigured } from "./config";
+import { fetchOriginalArticle } from "./original";
 import { stripHtml, truncate } from "./text";
 
 type ArticleWithSource = Article & { source: Source };
@@ -12,6 +13,8 @@ type AiResponse = {
     };
   }>;
 };
+
+const MIN_SUMMARY_INPUT_LEN = 400;
 
 export type ParsedSummary = {
   summary: string;
@@ -25,7 +28,7 @@ export async function summarizeArticle(articleId: string, force = false, content
     return article;
   }
 
-  const bodyText = getSummaryInput(article, contentOverride);
+  const bodyText = await resolveSummaryInput(article, contentOverride);
   const early = await validateSummaryRequest(article.id, bodyText);
   if (early) return early;
 
@@ -63,6 +66,17 @@ export async function getArticleForSummary(articleId: string) {
 
 export function getSummaryInput(article: ArticleWithSource, contentOverride?: string) {
   return stripHtml(contentOverride || article.content || article.summary || article.title);
+}
+
+export async function resolveSummaryInput(article: ArticleWithSource, contentOverride?: string) {
+  const override = stripHtml(contentOverride || "");
+  if (override.length >= MIN_SUMMARY_INPUT_LEN) return override;
+
+  const original = await fetchOriginalArticle(article.link);
+  if (original.text) return original.text;
+
+  if (override) return override;
+  return stripHtml(article.content || article.summary || article.title);
 }
 
 export async function validateSummaryRequest(articleId: string, bodyText: string) {
@@ -161,8 +175,8 @@ function buildRequestBody(article: ArticleWithSource, bodyText: string, stream: 
       {
         role: "system",
         content: stream
-          ? "你是一个严谨的 AI 新闻编辑。请用中文直接输出，不要 Markdown 标题，不要添加原文没有的信息。格式固定为：第一段是 2-3 句摘要；然后一行“要点：”；再输出 3-5 条短要点，每条以“- ”开头。"
-          : "你是一个严谨的 AI 新闻编辑。请用中文输出 JSON，不要 Markdown，不要添加原文没有的信息。格式：{\"summary\":\"2-3句中文摘要\",\"bullets\":[\"要点1\",\"要点2\",\"要点3\"]}。"
+          ? "你是一个严谨的 AI 新闻编辑。请用中文直接输出，不要 Markdown 标题，不要添加原文没有的信息。格式固定为：第一段是 2-3 句摘要；然后一行“要点：”；再输出 3-5 条短要点，每条以“- ”开头。要点需补充摘要之外的信息，避免复述摘要句子。"
+          : "你是一个严谨的 AI 新闻编辑。请用中文输出 JSON，不要 Markdown，不要添加原文没有的信息。格式：{\"summary\":\"2-3句中文摘要\",\"bullets\":[\"要点1\",\"要点2\",\"要点3\"]}。要点需补充摘要之外的信息，避免复述摘要句子。"
       },
       {
         role: "user",

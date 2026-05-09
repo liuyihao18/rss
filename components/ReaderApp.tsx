@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   BookOpenCheck,
@@ -56,6 +56,7 @@ export default function ReaderApp({
   const [refreshing, setRefreshing] = useState(false);
   const [summarizingId, setSummarizingId] = useState("");
   const [streamText, setStreamText] = useState("");
+  const autoSummarized = useRef(new Set<string>());
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -112,6 +113,15 @@ export default function ReaderApp({
     await readSummaryStream(response);
     setSummarizingId("");
   }
+
+  useEffect(() => {
+    if (!aiConfigured || !selected) return;
+    if (selected.aiSummary || selected.aiError) return;
+    if (summarizingId === selected.id) return;
+    if (autoSummarized.current.has(selected.id)) return;
+    autoSummarized.current.add(selected.id);
+    void summarize(selected.id, false);
+  }, [aiConfigured, selected?.aiError, selected?.aiSummary, selected?.id, summarizingId]);
 
   async function readSummaryStream(response: Response) {
     const reader = response.body?.getReader();
@@ -328,7 +338,7 @@ export default function ReaderApp({
                   </>
                 ) : (
                   <p className="text-sm leading-6 text-ink/62">
-                    {aiConfigured ? "可为这篇文章按需生成中文摘要和要点。" : "未配置 AI_API_KEY，当前显示原文摘要。"}
+                    {aiConfigured ? "可为这篇文章生成中文摘要和要点。" : "未配置 AI_API_KEY，当前显示原文摘要。"}
                   </p>
                 )}
                 {selected.aiError ? <p className="mt-3 text-sm text-berry">{selected.aiError}</p> : null}

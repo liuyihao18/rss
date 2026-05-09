@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 type ArticleSummaryBoxProps = {
@@ -31,6 +31,13 @@ export default function ArticleSummaryBox({
   const [error, setError] = useState(initialError);
   const [loading, setLoading] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const autoTriggered = useRef(false);
+
+  useEffect(() => {
+    if (!aiConfigured || summary || error || autoTriggered.current) return;
+    autoTriggered.current = true;
+    void summarize(false);
+  }, [aiConfigured, error, summary]);
 
   async function summarize(force = false) {
     setLoading(true);

@@ -1,24 +1,22 @@
 import { NextRequest } from "next/server";
 import { isRequestAuthenticated } from "@/lib/auth";
-import {
-  fetchAiCompletion,
-  getArticleForSummary,
-  resolveSummaryInput,
-  parsePlainSummary,
-  saveSummary,
-  saveSummaryError,
-  validateSummaryRequest
-} from "@/lib/ai";
+import { fetchOriginalArticle } from "@/lib/original";
 import { serializeArticle } from "@/lib/serializers";
+import {
+  buildFallbackTranslationInput,
+  createTranslationSourceHash,
+  fetchAiTranslation,
+  getArticleForTranslation,
+  limitParagraphs,
+  normalizeTranslationInput,
+  parsePlainTranslation,
+  saveTranslation,
+  saveTranslationError,
+  splitParagraphs,
+  validateTranslationRequest
+} from "@/lib/translation";
 
-type StreamChunk = {
-  choices?: Array<{
-    delta?: {
-      content?: string;
-    };
-  }>;
-};
-
+const MIN_TRANSLATION_INPUT_LEN = 400;
 const encoder = new TextEncoder();
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -27,16 +25,35 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   const body = (await request.json().catch(() => ({}))) as { force?: boolean; contentOverride?: string };
-  const article = await getArticleForSummary(params.id);
+  const article = await getArticleForTranslation(params.id);
 
-  if (!body.force && article.aiSummary) {
+  let bodyText = normalizeTranslationInput(typeof body.contentOverride === "string" ? body.contentOverride : "");
+  if (bodyText.length < MIN_TRANSLATION_INPUT_LEN) {
+    const original = await fetchOriginalArticle(article.link);
+    if (original.text) {
+      bodyText = original.text;
+    }
+  }
+
+  if (!bodyText) {
+    bodyText = buildFallbackTranslationInput(article.content || article.summary || article.title || "");
+  }
+
+  const normalized = normalizeTranslationInput(bodyText);
+  const sourceHash = createTranslationSourceHash(normalized);
+  if (!body.force && article.aiTranslation && article.aiTranslationSourceHash === sourceHash) {
     return streamDone(serializeArticle(article));
   }
 
-  const bodyText = await resolveSummaryInput(article, typeof body.contentOverride === "string" ? body.contentOverride : undefined);
-  const early = await validateSummaryRequest(article.id, bodyText);
+  const early = await validateTranslationRequest(article.id, normalized);
   if (early) {
     return streamDone(serializeArticle(early));
+  }
+
+  const paragraphs = limitParagraphs(splitParagraphs(normalized));
+  if (!paragraphs.length) {
+    const updated = await saveTranslationError(article.id, "文章内容过少，无法生成翻译。", sourceHash);
+    return streamDone(serializeArticle(updated));
   }
 
   const stream = new ReadableStream<Uint8Array>({
@@ -46,7 +63,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       let fullText = "";
 
       try {
-        const response = await fetchAiCompletion(article, bodyText, true, abort.signal);
+        const response = await fetchAiTranslation(article, paragraphs, true, abort.signal);
         if (!response.body) throw new Error("AI 接口未返回流式内容");
 
         const reader = response.body.getReader();
@@ -69,11 +86,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           }
         }
 
-        const parsed = parsePlainSummary(fullText);
-        const updated = await saveSummary(article.id, parsed);
+        const parsed = parsePlainTranslation(fullText, paragraphs.length);
+        const updated = await saveTranslation(article.id, parsed, sourceHash);
         send(controller, "done", serializeArticle(updated));
       } catch (error) {
-        const updated = await saveSummaryError(article.id, error instanceof Error ? error.message : "AI 摘要生成失败");
+        const updated = await saveTranslationError(
+          article.id,
+          error instanceof Error ? error.message : "AI 翻译生成失败",
+          sourceHash
+        );
         send(controller, "error", serializeArticle(updated));
       } finally {
         clearTimeout(timer);
@@ -110,7 +131,7 @@ function readSseToken(part: string) {
   for (const line of lines) {
     if (!line || line === "[DONE]") continue;
     try {
-      const chunk = JSON.parse(line) as StreamChunk;
+      const chunk = JSON.parse(line) as { choices?: Array<{ delta?: { content?: string } }> };
       token += chunk.choices?.[0]?.delta?.content || "";
     } catch {
       continue;

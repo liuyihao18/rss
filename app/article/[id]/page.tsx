@@ -7,6 +7,7 @@ import { isAiConfigured } from "@/lib/config";
 import { formatDisplayDateTime } from "@/lib/dates";
 import { fetchOriginalArticle } from "@/lib/original";
 import ArticleSummaryBox from "@/components/ArticleSummaryBox";
+import ArticleTranslationBox from "@/components/ArticleTranslationBox";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export default async function ArticlePage({ params }: { params: { id: string } }
   if (!article) redirect("/");
 
   const bullets = article.aiBullets ? (JSON.parse(article.aiBullets) as string[]) : [];
+
   const original = await fetchOriginalArticle(article.link);
   const fallbackText = article.content || article.summary || "此 RSS 条目没有提供摘要内容。";
   const bodyText = original.text || fallbackText;
@@ -52,11 +54,14 @@ export default async function ArticlePage({ params }: { params: { id: string } }
           contentOverride={bodyText}
         />
 
-        <div className="space-y-5 leading-8 text-ink/78">
-          {bodyText.split(/\n{2,}/).map((paragraph) => (
-            <p key={paragraph.slice(0, 80)}>{paragraph}</p>
-          ))}
-        </div>
+        <ArticleTranslationBox
+          articleId={article.id}
+          aiConfigured={isAiConfigured()}
+          initialTranslation={article.aiTranslation}
+          initialError={article.aiTranslationError}
+          initialSourceHash={article.aiTranslationSourceHash}
+          contentOverride={bodyText}
+        />
 
         <a
           href={article.link}

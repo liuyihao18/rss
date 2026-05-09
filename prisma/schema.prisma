@@ -39,6 +39,10 @@ model Article {
   aiBullets       String?
   aiError         String?
   aiGeneratedAt   DateTime?
+  aiTranslation   String?
+  aiTranslationError String?
+  aiTranslationGeneratedAt DateTime?
+  aiTranslationSourceHash String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

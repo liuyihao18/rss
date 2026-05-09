@@ -14,6 +14,10 @@ export function serializeArticle(article: Article & { source: Pick<Source, "id" 
     aiBullets: article.aiBullets,
     aiError: article.aiError,
     aiGeneratedAt: article.aiGeneratedAt?.toISOString() || null,
+    aiTranslation: article.aiTranslation,
+    aiTranslationError: article.aiTranslationError,
+    aiTranslationGeneratedAt: article.aiTranslationGeneratedAt?.toISOString() || null,
+    aiTranslationSourceHash: article.aiTranslationSourceHash,
     source: {
       id: article.source.id,
       name: article.source.name
