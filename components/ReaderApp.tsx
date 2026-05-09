@@ -202,9 +202,8 @@ export default function ReaderApp({
             <button
               key={value}
               onClick={() => setFilter(value as "all" | "unread" | "favorite")}
-              className={`rounded-md border px-2 py-2 text-sm ${
-                filter === value ? "border-moss bg-moss text-white" : "border-moss/15 bg-white text-ink/70 hover:bg-mist"
-              }`}
+              className={`rounded-md border px-2 py-2 text-sm ${filter === value ? "border-moss bg-moss text-white" : "border-moss/15 bg-white text-ink/70 hover:bg-mist"
+                }`}
             >
               {label}
               <span className="ml-1 text-xs opacity-75">{count}</span>
@@ -267,9 +266,8 @@ export default function ReaderApp({
                 setSelectedId(article.id);
                 if (!article.isRead) void patchArticle(article.id, { isRead: true });
               }}
-              className={`w-full rounded-lg border p-4 text-left transition ${
-                selected?.id === article.id ? "border-moss bg-white shadow-soft" : "border-moss/10 bg-white/80 hover:border-moss/30"
-              } ${article.isRead ? "opacity-75" : ""}`}
+              className={`w-full rounded-lg border p-4 text-left transition ${selected?.id === article.id ? "border-moss bg-white shadow-soft" : "border-moss/10 bg-white/80 hover:border-moss/30"
+                } ${article.isRead ? "opacity-75" : ""}`}
             >
               <div className="mb-2 flex items-center justify-between gap-3 text-xs text-ink/55">
                 <span>{article.source.name}</span>
