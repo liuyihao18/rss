@@ -15,8 +15,8 @@ services:
       AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-30}
     volumes:
       - ai-rss-data:/data
-    ports:
-      - "3000:3000"
+    # ports:
+    #   - "3000:3000"
     expose:
       - "3000"
 

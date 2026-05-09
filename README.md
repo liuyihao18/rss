@@ -25,8 +25,7 @@ docker compose up -d --build
 
 默认访问：
 
-- 直接访问应用：`http://localhost:3000`
-- 如果 Caddy 服务正常启动：`http://localhost`
+- 如果 Caddy 服务正常启动：`http://localhost:11111`
 
 首次进入后，点击页面里的“刷新 RSS”抓取文章。
 
