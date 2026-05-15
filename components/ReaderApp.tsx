@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   BookOpenCheck,
@@ -73,6 +73,9 @@ export default function ReaderApp({
   const unreadCount = articles.filter((article) => !article.isRead).length;
   const favoriteCount = articles.filter((article) => article.isFavorite).length;
   const failedCount = sources.filter((source) => source.lastError).length;
+  const selectedAutoId = selected?.id;
+  const selectedHasSummary = Boolean(selected?.aiSummary);
+  const selectedHasError = Boolean(selected?.aiError);
 
   async function refresh() {
     setRefreshing(true);
@@ -97,54 +100,7 @@ export default function ReaderApp({
     setArticles((current) => current.map((article) => (article.id === updated.id ? updated : article)));
   }
 
-  async function summarize(id: string, force = false) {
-    setSummarizingId(id);
-    setStreamText("");
-    const article = articles.find((item) => item.id === id);
-    const response = await fetch(`/api/articles/${id}/summarize/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force, contentOverride: article?.content || article?.summary || article?.title || "" })
-    });
-    if (!response.ok || !response.body) {
-      setSummarizingId("");
-      return;
-    }
-    await readSummaryStream(response);
-    setSummarizingId("");
-  }
-
-  useEffect(() => {
-    if (!aiConfigured || !selected) return;
-    if (selected.aiSummary || selected.aiError) return;
-    if (summarizingId === selected.id) return;
-    if (autoSummarized.current.has(selected.id)) return;
-    autoSummarized.current.add(selected.id);
-    void summarize(selected.id, false);
-  }, [aiConfigured, selected?.aiError, selected?.aiSummary, selected?.id, summarizingId]);
-
-  async function readSummaryStream(response: Response) {
-    const reader = response.body?.getReader();
-    if (!reader) return;
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() || "";
-
-      for (const event of events) {
-        handleSummaryEvent(event);
-      }
-    }
-  }
-
-  function handleSummaryEvent(raw: string) {
+  const handleSummaryEvent = useCallback((raw: string) => {
     const event = raw
       .split(/\r?\n/)
       .find((line) => line.startsWith("event:"))
@@ -168,7 +124,57 @@ export default function ReaderApp({
       setArticles((current) => current.map((article) => (article.id === data.id ? data : article)));
       setStreamText("");
     }
-  }
+  }, []);
+
+  const readSummaryStream = useCallback(
+    async (response: Response) => {
+      const reader = response.body?.getReader();
+      if (!reader) return;
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const event of events) {
+          handleSummaryEvent(event);
+        }
+      }
+    },
+    [handleSummaryEvent]
+  );
+
+  const summarize = useCallback(async (id: string, force = false) => {
+    setSummarizingId(id);
+    setStreamText("");
+    const article = articles.find((item) => item.id === id);
+    const response = await fetch(`/api/articles/${id}/summarize/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force, contentOverride: article?.content || article?.summary || article?.title || "" })
+    });
+    if (!response.ok || !response.body) {
+      setSummarizingId("");
+      return;
+    }
+    await readSummaryStream(response);
+    setSummarizingId("");
+  }, [articles, readSummaryStream]);
+
+  useEffect(() => {
+    if (!aiConfigured || !selectedAutoId) return;
+    if (selectedHasSummary || selectedHasError) return;
+    if (summarizingId === selectedAutoId) return;
+    if (autoSummarized.current.has(selectedAutoId)) return;
+    autoSummarized.current.add(selectedAutoId);
+    void summarize(selectedAutoId, false);
+  }, [aiConfigured, selectedAutoId, selectedHasError, selectedHasSummary, summarize, summarizingId]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 px-3 py-4 pb-24 sm:px-5 lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:pb-6">

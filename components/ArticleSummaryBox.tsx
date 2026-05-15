@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 type ArticleSummaryBoxProps = {
@@ -33,55 +33,7 @@ export default function ArticleSummaryBox({
   const [streamText, setStreamText] = useState("");
   const autoTriggered = useRef(false);
 
-  useEffect(() => {
-    if (!aiConfigured || summary || error || autoTriggered.current) return;
-    autoTriggered.current = true;
-    void summarize(false);
-  }, [aiConfigured, error, summary]);
-
-  async function summarize(force = false) {
-    setLoading(true);
-    setError(null);
-    setStreamText("");
-
-    const response = await fetch(`/api/articles/${articleId}/summarize/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force, contentOverride })
-    });
-
-    if (!response.ok || !response.body) {
-      setLoading(false);
-      setError("摘要生成失败，请稍后重试。");
-      return;
-    }
-
-    await readSummaryStream(response);
-    setLoading(false);
-  }
-
-  async function readSummaryStream(response: Response) {
-    const reader = response.body?.getReader();
-    if (!reader) return;
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() || "";
-
-      for (const event of events) {
-        handleSseEvent(event);
-      }
-    }
-  }
-
-  function handleSseEvent(raw: string) {
+  const handleSseEvent = useCallback((raw: string) => {
     const event = raw
       .split(/\r?\n/)
       .find((line) => line.startsWith("event:"))
@@ -107,7 +59,58 @@ export default function ArticleSummaryBox({
       setError(data.aiError);
       setStreamText("");
     }
-  }
+  }, []);
+
+  const readSummaryStream = useCallback(
+    async (response: Response) => {
+      const reader = response.body?.getReader();
+      if (!reader) return;
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const event of events) {
+          handleSseEvent(event);
+        }
+      }
+    },
+    [handleSseEvent]
+  );
+
+  const summarize = useCallback(async (force = false) => {
+    setLoading(true);
+    setError(null);
+    setStreamText("");
+
+    const response = await fetch(`/api/articles/${articleId}/summarize/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force, contentOverride })
+    });
+
+    if (!response.ok || !response.body) {
+      setLoading(false);
+      setError("摘要生成失败，请稍后重试。");
+      return;
+    }
+
+    await readSummaryStream(response);
+    setLoading(false);
+  }, [articleId, contentOverride, readSummaryStream]);
+
+  useEffect(() => {
+    if (!aiConfigured || summary || error || autoTriggered.current) return;
+    autoTriggered.current = true;
+    void summarize(false);
+  }, [aiConfigured, error, summarize, summary]);
 
   return (
     <section className="mb-6 rounded-md border border-saffron/25 bg-saffron/10 p-4">
